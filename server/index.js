@@ -3,6 +3,9 @@ const app = express();
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const dotenv = require("dotenv");
+
+dotenv.config();
 
 app.use(cors());
 
@@ -13,7 +16,8 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: /vercel\.app$/i, //set up origin of request
+    // origin: /vercel\.app$/i, //set up origin of request
+    origin: process.env.ORIGIN_URL,
     methods: ["GET", "POST"],
   },
 });
