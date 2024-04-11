@@ -110,13 +110,34 @@ io.on("connection", (socket) => {
   //receives user_choice value. here should be logic to check if theres a winner
   socket.on("user_choice", async (data) => {
     //logic to handle game
-    const results = await compareInputs(data);
+    let gameResult;
 
-    // messaging
+    if (!user1Data) {
+      user1Data = data;
+      console.log("user1 input: " + user1Data.input);
+    } else {
+      user2Data = data;
+      console.log("user2 input:" + user2Data.input);
 
-    socket.on("message", (data) => {
-      io.to(data.roomId).emit();
-    });
+      if (user1Data.input == "Rock" && user2Data.input == "Scissor") {
+        gameResult = `${user1Data.username} Won!`;
+      } else if (user1Data.input == "Rock" && user2Data.input == "Paper") {
+        gameResult = `${user2Data.username} Won!`;
+      } else if (user1Data.input == "Scissor" && user2Data.input == "Rock") {
+        gameResult = `${user2Data.username} Won!`;
+      } else if (user1Data.input == "Scissor" && user2Data.input == "Paper") {
+        gameResult = `${user1Data.username} Won!`;
+      } else if (user1Data.input == "Paper" && user2Data.input == "Rock") {
+        gameResult = `${user1Data.username} Won!`;
+      } else if (user1Data.input == "Paper" && user2Data.input == "Scissor") {
+        gameResult = `${user2Data.username} Won!`;
+      } else {
+        gameResult = "Tied!";
+      }
+      io.to(user2Data.roomId).emit("game_result", gameResult); //sends message to everyone in room, or use socket.to(room).emit(event); to emit message to all in the room except that socket
+      user1Data = null;
+      user2Data = null;
+    }
   });
 });
 
