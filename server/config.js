@@ -8,5 +8,4 @@ dotenv.config({
 module.exports = {
   NODE_ENV: process.env.NODE_ENV || "development",
   ORIGIN_URL: process.env.ORIGIN_URL || "http://localhost:3000",
-  PORT: process.env.PORT || 3001,
 };
