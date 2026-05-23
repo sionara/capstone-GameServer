@@ -1,24 +1,54 @@
-# capstone-rockPaperScissor
-Capstone project: The game UI and real-time server built with React, Node/Express and Socet.io
+# Project name
 
+Web-based Rock-Paper-Scissor game with real-time chatting feature
 
-# Project Title
+**Live demo:** [[link](https://capstone-game-ui.vercel.app/)] 
+**Stack:** TypeScript · Node.js · Socket.io · MongoDB
 
-A brief description of what the project does and what problem it solves.
+## What it does
 
-## Table of Contents
+- Create and stores new accounts
+- Creates game rooms that allows two people to join in real-time to engage in game
+- Real-time chatting feature in game rooms
 
-- [Installation](#installation)
-- [Usage](#usage)
-- [Contributing](#contributing)
-- [License](#license)
+## Architecture
 
-## Installation
+This is a three-tier web application: a React single-page client talks to an Express REST API over HTTPS, and the API persists data to a MySQL database through a pooled connection.
 
-Provide step-by-step instructions on how to install and set up the project. Include any prerequisites or dependencies that need to be installed.
+```
+┌──────────────────────────────────┐
+│       Client (Browser)            │
+│   React + TypeScript              │
+│   - Components, hooks, routing    │
+│   - Axios HTTP client             │
+└──────────────┬───────────────────┘
+               │
+               │  HTTPS · JSON · REST
+               │  (Axios → /api/*)
+               ▼
+┌──────────────────────────────────┐
+│       Express API Server          │
+│   Node.js + TypeScript            │
+│   - Route handlers                │
+│   - Request validation            │
+│   - Business logic                │
+│   - Error handling middleware     │
+└──────────────┬───────────────────┘
+               │
+               │  TCP · SQL
+               │  (mysql2 connection pool)
+               ▼
+┌──────────────────────────────────┐
+│       MySQL Database              │
+│   - Normalized relational schema  │
+│   - Indexed foreign keys          │
+│   - Persistent storage            │
+└──────────────────────────────────┘
+```
 
-```bash
-# Example installation commands
-$ git clone https://github.com/username/project.git
-$ cd project
-$ npm install
+## What I learned so far
+
+- Separation of concerns. What standard should I use to determine how many APIs to make, which components should be modularized
+- Routing different pages
+- Encryption, protecting sensitive data
+- How to make an intuitive UI?
