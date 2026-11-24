@@ -74,6 +74,17 @@ function findRoomBySocketId(socketId) {
   return null;
 }
 
+// The live (not finished) room this account holds a seat in, if any - used to
+// enforce "one active room per account" across tabs and browsers. A player
+// who disconnected but is still inside the reconnect grace period counts.
+function findActiveRoomByUserId(userId) {
+  for (const room of rooms.values()) {
+    if (room.status === "finished") continue;
+    if (room.players.some((p) => p.userId === userId)) return room;
+  }
+  return null;
+}
+
 function playerByClientId(room, clientId) {
   return room.players.find((p) => p.clientId === clientId) || null;
 }
@@ -123,6 +134,7 @@ module.exports = {
   getRoom,
   deleteRoom,
   findRoomBySocketId,
+  findActiveRoomByUserId,
   playerByClientId,
   otherPlayer,
   lobbySummary,

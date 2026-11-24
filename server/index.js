@@ -3,7 +3,15 @@ const app = express();
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const config = require("./config.js");
+
+if (!config.JWT_SECRET) {
+  console.error(
+    "JWT_SECRET is not set. It must match APIServer's JWT_SECRET so login tokens can be verified."
+  );
+  process.exit(1);
+}
 
 const { determineWinner } = require("./modules/determineWinner.js");
 const roomsStore = require("./modules/rooms.js");
@@ -49,17 +57,25 @@ async function recordMatchResult(room, winnerClientId, loserClientId) {
   const winnerScore = room.score[winnerClientId] ?? 0;
   const loserScore = room.score[loserClientId] ?? 0;
 
+  // One transaction so stats and history can't disagree if a write fails.
+  let client;
   try {
-    await db.query("UPDATE users SET win = win + 1 WHERE id = ?", [winner.userId]);
-    await db.query("UPDATE users SET loss = loss + 1 WHERE id = ?", [loser.userId]);
-    await db.query(
+    client = await db.connect();
+    await client.query("BEGIN");
+    await client.query("UPDATE users SET win = win + 1 WHERE id = $1", [winner.userId]);
+    await client.query("UPDATE users SET loss = loss + 1 WHERE id = $1", [loser.userId]);
+    await client.query(
       `INSERT INTO history
          (player1_id, player2_id, winner_id, loser_id, reason, winner_score, loser_score)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [p1.userId, p2.userId, winner.userId, loser.userId, room.reason, winnerScore, loserScore]
     );
+    await client.query("COMMIT");
   } catch (err) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
     console.error(`Failed to record match result for room ${room.code}:`, err);
+  } finally {
+    if (client) client.release();
   }
 }
 
@@ -148,12 +164,43 @@ function handlePlayerExit(room, clientId, { immediate }) {
   }, roomsStore.GRACE_MS);
 }
 
+// Every socket must present the login token APIServer issued
+// (io(url, { auth: { token } }) on the client). Who the player is comes from
+// the verified token - never from userId/username fields in event payloads,
+// which anyone could edit in dev tools.
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error("unauthorized"));
+
+  jwt.verify(token, config.JWT_SECRET, (err, payload) => {
+    if (err || !payload?.id) return next(new Error("unauthorized"));
+    socket.data.user = { id: Number(payload.id), name: payload.name };
+    next();
+  });
+});
+
+// clientId identifies a tab and is visible to the opponent (publicRoomState),
+// so it can't prove ownership on its own: the seat must also belong to the
+// account this socket logged in as.
+function ownSeat(socket, room, clientId) {
+  const player = roomsStore.playerByClientId(room, clientId);
+  if (!player || player.userId !== socket.data.user.id) return null;
+  return player;
+}
+
+function alreadyInRoomMessage(room) {
+  return `You're already in room ${room.code}. Leave it before joining or creating another room.`;
+}
+
 //detects connections from clients
 io.on("connection", (socket) => {
   socket.on("send_message", (data) => {
-    io.to(data.room).emit("receive_message", {
-      user: data.user,
-      message: data.message,
+    const { room, message } = data || {};
+    // Only rooms this socket actually joined, and the sender's real name.
+    if (!room || !message || !socket.rooms.has(room)) return;
+    io.to(room).emit("receive_message", {
+      user: socket.data.user.name,
+      message,
     });
   });
 
@@ -163,10 +210,17 @@ io.on("connection", (socket) => {
 
   socket.on("create_room", (payload, callback) => {
     const ack = typeof callback === "function" ? callback : () => {};
-    const { username, clientId, userId, bestOf } = payload || {};
+    const { clientId, bestOf } = payload || {};
+    const { id: userId, name: username } = socket.data.user;
 
-    if (!username || !clientId || !userId) {
+    if (!clientId) {
       return ack({ ok: false, message: "Missing player info" });
+    }
+
+    // One active room per account, across every tab and browser.
+    const activeRoom = roomsStore.findActiveRoomByUserId(userId);
+    if (activeRoom) {
+      return ack({ ok: false, message: alreadyInRoomMessage(activeRoom) });
     }
 
     const room = roomsStore.createRoom({
@@ -184,9 +238,10 @@ io.on("connection", (socket) => {
 
   socket.on("join_room", (payload, callback) => {
     const ack = typeof callback === "function" ? callback : () => {};
-    const { code, username, clientId, userId } = payload || {};
+    const { code, clientId } = payload || {};
+    const { id: userId, name: username } = socket.data.user;
 
-    if (!code || !username || !clientId || !userId) {
+    if (!code || !clientId) {
       return ack({ ok: false, message: "Missing room code or player info" });
     }
 
@@ -198,8 +253,13 @@ io.on("connection", (socket) => {
       return ack({ ok: false, message: "Room not found" });
     }
 
-    // Reconnect: same tab (same clientId) rejoining, e.g. after a refresh.
+    // Reconnect: same tab (same clientId) of the same account rejoining, e.g.
+    // after a refresh. A clientId match from a different account is someone
+    // trying to take over a seat using the opponent-visible clientId.
     const existingByClientId = roomsStore.playerByClientId(room, clientId);
+    if (existingByClientId && existingByClientId.userId !== userId) {
+      return ack({ ok: false, message: "Could not join room" });
+    }
     if (existingByClientId) {
       if (existingByClientId.disconnectTimer) {
         clearTimeout(existingByClientId.disconnectTimer);
@@ -221,6 +281,12 @@ io.on("connection", (socket) => {
         ok: false,
         message: "You are already in this room in another tab",
       });
+    }
+
+    // Seated in some other live room (another tab or browser).
+    const activeRoom = roomsStore.findActiveRoomByUserId(userId);
+    if (activeRoom) {
+      return ack({ ok: false, message: alreadyInRoomMessage(activeRoom) });
     }
 
     if (room.players.length >= 2) {
@@ -253,6 +319,8 @@ io.on("connection", (socket) => {
     if (!code || !clientId) return;
     const room = roomsStore.getRoom(code);
     if (!room) return;
+    // Without this, an opponent could forfeit you by sending your clientId.
+    if (!ownSeat(socket, room, clientId)) return;
     handlePlayerExit(room, clientId, { immediate: true });
   });
 
@@ -265,7 +333,8 @@ io.on("connection", (socket) => {
     const room = roomsStore.getRoom(code);
     if (!room || room.status !== "playing") return; // no moves after finished
 
-    const player = roomsStore.playerByClientId(room, clientId);
+    // Must be this account's own seat - no picking moves for the opponent.
+    const player = ownSeat(socket, room, clientId);
     if (!player || !player.connected) return;
     if (player.choice) return; // already locked in for this round
 

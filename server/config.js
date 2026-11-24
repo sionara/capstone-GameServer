@@ -9,4 +9,7 @@ module.exports = {
   NODE_ENV: process.env.NODE_ENV || "development",
   ORIGIN_URL: process.env.ORIGIN_URL || "http://localhost:3000",
   PORT: process.env.PORT || 3001,
+  // Same secret APIServer signs login tokens with - lets this server verify
+  // who a socket belongs to instead of trusting ids sent by the client.
+  JWT_SECRET: process.env.JWT_SECRET,
 };

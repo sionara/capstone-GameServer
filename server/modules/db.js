@@ -1,8 +1,7 @@
-// Pooled (not single-connection) because, unlike APIServer's short-lived
-// serverless invocations, this server is a long-running process - a single
-// dropped/idle-timed-out connection here would otherwise silently break every
-// win/loss write until the process is restarted.
-const mysql = require("mysql2/promise");
+// PostgreSQL pool (Aiven). A pool rather than a single client because this
+// server is a long-running process - one dropped/idle-timed-out connection
+// would otherwise silently break every win/loss write until a restart.
+const { Pool } = require("pg");
 const dotenv = require("dotenv");
 const path = require("path");
 
@@ -12,20 +11,30 @@ dotenv.config({
   path: path.resolve(__dirname, "..", `${process.env.NODE_ENV}.env`),
 });
 
-// TiDB Cloud's certificate is publicly trusted, so real TLS verification
-// works here (unlike a self-signed host, which would need rejectUnauthorized:
-// false - see connect.js in APIServer for the same reasoning).
-const useSsl = process.env.DB_SSL !== "false";
+// Aiven signs server certificates with a per-project CA. With DB_CA_CERT set
+// (Aiven console -> service -> "CA certificate") the connection is fully
+// verified; otherwise it's encrypted without verification, like Aiven's
+// sslmode=require. DB_SSL=false disables TLS for a local Postgres.
+function sslConfig() {
+  if (process.env.DB_SSL === "false") return false;
+  if (process.env.DB_CA_CERT) {
+    return { ca: process.env.DB_CA_CERT.replace(/\\n/g, "\n") };
+  }
+  return { rejectUnauthorized: false };
+}
 
-const pool = mysql.createPool({
+const pool = new Pool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PWD,
-  port: process.env.DB_PORT,
+  port: Number(process.env.DB_PORT) || 5432,
   database: process.env.DB,
-  ssl: useSsl ? { minVersion: "TLSv1.2" } : undefined,
-  waitForConnections: true,
-  connectionLimit: 5,
+  ssl: sslConfig(),
+  max: 5,
+});
+
+pool.on("error", (err) => {
+  console.error("Unexpected Postgres pool error:", err);
 });
 
 module.exports = pool;

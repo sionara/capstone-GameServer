@@ -13,7 +13,7 @@ Web-based Rock-Paper-Scissor game with real-time chatting feature
 
 ## Architecture
 
-This is a three-tier web application: a React single-page client talks to an Express REST API over HTTPS, and the API persists data to a MySQL database through a pooled connection.
+This is a three-tier web application: a React single-page client talks to an Express REST API over HTTPS, and the API persists data to a PostgreSQL database (Aiven) through a pooled connection.
 
 ```
 ┌──────────────────────────────────┐
@@ -36,10 +36,10 @@ This is a three-tier web application: a React single-page client talks to an Exp
 └──────────────┬───────────────────┘
                │
                │  TCP · SQL
-               │  (mysql2 connection pool)
+               │  (pg connection pool)
                ▼
 ┌──────────────────────────────────┐
-│       MySQL Database              │
+│       PostgreSQL Database         │
 │   - Normalized relational schema  │
 │   - Indexed foreign keys          │
 │   - Persistent storage            │
